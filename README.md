@@ -1,8 +1,8 @@
 # Fairness-Aware and Latency-Controllable Scheduling for Chunked-Prefill LLM Serving
 
-Sarathi-Serve is a high-throughput, low-latency LLM inference framework. The corresponding paper is titled "Fairness-Aware and Latency-Controllable Scheduling for Chunked-Prefill LLM Serving."
+This project is a high-throughput, low-latency LLM inference framework. The corresponding paper is titled "Fairness-Aware and Latency-Controllable Scheduling for Chunked-Prefill LLM Serving."
 
-This project builds on [Sarathi-Serve](https://www.usenix.org/conference/osdi24/presentation/agrawal) with further optimizations.
+It builds on [Sarathi-Serve](https://www.usenix.org/conference/osdi24/presentation/agrawal) with further optimizations.
 
 ---
 
