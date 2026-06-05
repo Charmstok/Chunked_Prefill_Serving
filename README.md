@@ -1,96 +1,125 @@
-# Opt-Sarathi-Serve
+# Fairness-Aware and Latency-Controllable Scheduling for Chunked-Prefill LLM Serving
 
-Sarathi-Serve 是一个高吞吐、低延迟的大模型推理框架，技术细节详见 [OSDI'24 paper](https://www.usenix.org/conference/osdi24/presentation/agrawal) 论文。
+Sarathi-Serve is a high-throughput, low-latency LLM inference framework. The corresponding paper is titled "Fairness-Aware and Latency-Controllable Scheduling for Chunked-Prefill LLM Serving."
 
-本项目基于 Sarathi-Serve 做更进一步的优化。
+This project builds on [Sarathi-Serve](https://www.usenix.org/conference/osdi24/presentation/agrawal) with further optimizations.
 
 ---
 
-## 工作
+## Current Work
 
-### 适配模型
+### Supported models
 
 - Qwen3/Qwen3-8B
 - Qwen/Qwen-7B
+- openPangu(https://ai.gitcode.com/ascend-tribe/openPangu-Embedded-7B-V1.1)
 
-### 测试的数据集
+### Tested dataset
 
 - [ShareGPT_Vicuna_unfiltered](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/tree/main)
 
 ---
 
-## 运行
+## Setup
 
 ### CUDA
 
-本项目基于 CUDA 12.8 on NVIDIA 3090 and 4090.
+This project was developed and tested with CUDA 12.8 on NVIDIA 3090 and 4090 GPUs.
+Some experiments were also run on NVIDIA RTX PRO 5000 72GB GPUs.
 
-### Clone 项目
+### Clone the project
 
 ```sh
 git clone https://github.com/Charmstok/sarathi-serve.git
 ```
 
-### conda 环境
+### Conda environment
 
-创建 python 3.11 环境
+Create a Python 3.11 environment:
 
 ```sh
-conda create -p ./env python=3.11  
+conda create -p ./env python=3.11
 ```
 
-激活创建的环境，
+Activate the environment:
 
 ```sh
 conda activate ./env
 ```
 
-### 安装本项目需要的依赖以及 cuda 环境
+### Install the project dependencies and CUDA-related requirements
 
 ```sh
-pip install -r requirements.txt
 pip install -e .
+pip install -r requirements.txt
 ```
 
-### 如何使用本项目？
+### How do I use this project?
 
-#### 方式一: 简单对话
+#### Option 1: Basic chat
 
 ```shell
-python example/chat_only.py
+python example/chat/chat_only.py
 ```
 
-#### 方式二: 离线测试
+#### Option 2: Offline evaluation
 
-基准测试得到的各项指标可以在 offline_inference_output 目录下查看.
+You can find the benchmark metrics in the `offline_inference_output` directory.
 
 ```shell
-python example/offline_inference.py
+python example/offline_inference/target_time.py
 ```
 
-#### 方式三: openai_entrypoints
+Before using `target_time`, first obtain the time prediction model as described below.
+
+Run the offline data collection script:
 
 ```shell
-python -m sarathi.entrypoints.openai.api_server \
-    --model_config_model Qwen/Qwen-7B \
-    --model_config_max_model_len 1024 \
-    --worker_config_gpu_memory_utilization 0.9
+python example/time_balance/offline_select_status_csv.py
 ```
 
-以上的运行命令没有涵盖所有参数, 你可以运行下列 sh 脚本获取更多帮助，
+It runs a batch of requests with `SarathiScheduler` and writes `select_stats_rank0.csv` during model execution:
+
+> Notes:
+> - The script output directory is `offline_inference_output/<timestamp>/replica_0/`.
+> - The key artifact is `select_stats_rank0.csv`, which contains features and labels such as `decode_tokens/prefill_tokens/.../latency_ms`.
+> - If you changed parameters such as `chunk_size/max_num_seqs/max_model_len` in the script, keep the training configuration consistent, especially `chunk_size`.
+
+Next, open `sarathi/time_balance/config.py` and update it based on the data you just generated:
+- `CSV_PATH`: point this to the latest `select_stats_rank0.csv`
+- `MODEL_CACHE_PATH`: path where the model will be saved (default: `sarathi/time_balance/time_predictor_mlp.pt`)
+- `BUCKET_SPLIT_CONFIG.chunk_size`: recommended to match the scheduler `chunk_size` used during data collection
+
+Run:
+
+```sh
+python sarathi/time_balance/predict_time.py
+```
+
+After training, the script prints the train/val/test MAE and writes the model to `MODEL_CACHE_PATH`.
+
+`OptSarathiScheduler` loads the model from `MODEL_CACHE_PATH` in `sarathi/time_balance/config.py` during initialization. If the file does not exist, it raises an `assert` immediately to avoid silent degradation in production.
+
+Use the following script to quickly verify that the model can be loaded and used for prediction:
+
+```sh
+python sarathi/time_balance/load_model.py
+```
+
+The commands above do not cover every parameter. For more options, run:
 
 ```sh
 python -m sarathi.entrypoints.api_server --help
 ```
 
-### 调参脚本
+### Tuning scripts
 
-如果你想要更高效的性能, 可能需要调整某些参数.
+If you want higher performance, you may need to tune some parameters.
 
-详见, [调整参数 README.md](example/README.md)
+See [Parameter Tuning README.md](example/README.md) for details.
 
 ---
 
-## 致谢
+## Acknowledgements
 
-本仓库源自 [sarathi-serve](https://github.com/microsoft/sarathi-serve) 项目 的一个分支。 本项目仅为研究原型，我们仅保留了原项目最关键的功能，并对代码进行了精简，以便更快地进行研究迭代。
+This repository originated from a branch of the [sarathi-serve](https://github.com/microsoft/sarathi-serve) project.
