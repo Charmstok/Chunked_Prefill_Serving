@@ -1,138 +1,138 @@
-# 实验
+# Experiments
 
-本目录用于存放围绕调度策略开展的可复现实验脚本。当前主要包含两类实验：
+This directory stores reproducible experiment scripts built around scheduling strategies. At the moment it mainly contains two classes of experiments:
 
 - `heterogeneous_prompt/`
-  - 用于验证在强异构 prompt 负载下，固定 `chunk_size` 与固定 `target_time` 两类调度方式的差异。
+  - Used to validate the difference between fixed `chunk_size` scheduling and fixed `target_time` scheduling under strongly heterogeneous prompt workloads.
 - `active_prefill_control/`
-  - 用于验证 `Active Prefill Control (APC)` 这类 unfinished prefill 活跃度控制策略是否能够改变 batch 结构，并进一步影响 `prefill_e2e_time` 与 `request_e2e_time`。
+  - Used to validate whether control strategies for the activity level of unfinished prefills, such as `Active Prefill Control (APC)`, can change batch structure and, in turn, affect `prefill_e2e_time` and `request_e2e_time`.
 
-所有实验脚本默认都在项目根目录下运行，并将结果输出到 `./offline_inference_output/` 下带时间戳的目录中。
+All experiment scripts are expected to run from the project root and write results to timestamped directories under `./offline_inference_output/`.
 
 ---
 
-## 1. 目录概览
+## 1. Directory overview
 
-当前实验目录结构如下：
+The current experiment directory structure is:
 
 - `example/experiment/README.md`
-  - 本说明文档。
+  - This document.
 - `example/experiment/heterogeneous_prompt/`
-  - 异构 prompt 负载实验。
+  - Experiments for heterogeneous prompt workloads.
 - `example/experiment/active_prefill_control/`
-  - APC 开关对比实验。
+  - On/off comparison experiments for APC.
 
-如果后续继续新增实验，建议保持每个实验子目录内至少包含：
+If you add more experiments later, each experiment subdirectory should ideally contain at least:
 
-- 一个公共参数文件或公共工具文件
-- 一个或多个可直接运行的实验脚本
-- 一个局部 README，用于记录该实验的特殊参数与输出说明
+- one shared parameter file or utility file
+- one or more directly runnable experiment scripts
+- a local README describing experiment-specific parameters and outputs
 
 ---
 
-## 2. 通用运行约定
+## 2. Common execution conventions
 
-### 2.1 运行位置
+### 2.1 Working directory
 
-所有脚本都默认从项目根目录执行：
+All scripts are expected to be run from the project root:
 
 ```bash
 cd /home/ta/project/sarathi-serve
 ```
 
-### 2.2 Python 环境
+### 2.2 Python environment
 
-推荐统一使用项目虚拟环境：
+Use the project virtual environment consistently:
 
 ```bash
 ./env/bin/python ...
 ```
 
-### 2.3 输出位置
+### 2.3 Output location
 
-每次运行都会在 `./offline_inference_output/` 下生成独立目录，目录名通常包含：
+Each run creates a separate directory under `./offline_inference_output/`. The directory name typically includes:
 
-- 时间戳
-- 实验名
-- 实验标签，如 `on/off`
+- a timestamp
+- the experiment name
+- an experiment label such as `on/off`
 
-典型输出内容包括：
+Typical outputs include:
 
 - `config.json`
-  - 保存本次实验的关键配置、脚本路径和 workload 摘要。
+  - Stores the key configuration, script path, and workload summary for the run.
 - `replica_0/heterogeneous_prompts.json`
-  - 保存本次实验实际使用的异构 prompt 数据集。
+  - Stores the heterogeneous prompt dataset actually used by the run.
 - `replica_0/select_stats_rank0.csv`
-  - 保存逐 batch 的调度选择统计。
+  - Stores per-batch scheduling selection statistics.
 - `replica_0/sequence_metrics.csv`
-  - 保存请求级指标，如 `prefill_e2e_time` 与 `request_e2e_time`。
+  - Stores request-level metrics such as `prefill_e2e_time` and `request_e2e_time`.
 
-若某个实验额外记录了新统计文件，会在该实验自己的 README 或下文对应小节中说明。
+If an experiment writes additional statistics files, they are documented either in that experiment's own README or in the relevant section below.
 
-### 2.4 可复现性
+### 2.4 Reproducibility
 
-当前实验脚本普遍采用如下可复现设计：
+The current experiment scripts generally use the following reproducibility design:
 
-- 固定数据源：`dataset/ShareGPT_V3_unfiltered_cleaned_split.json`
-- 固定异构 prompt 构造 `seed`
-- 固定 prompt 长度区间和 short/long 比例
-- 固定到达模式，如 clustered arrival
+- fixed data source: `dataset/ShareGPT_V3_unfiltered_cleaned_split.json`
+- fixed seed for heterogeneous prompt construction
+- fixed prompt length ranges and short/long ratio
+- fixed arrival pattern, such as clustered arrival
 
-因此，只要模型、tokenizer 和数据源不变，同一组脚本参数通常可以复现实验 workload。
+As long as the model, tokenizer, and data source stay the same, the same script parameters should usually reproduce the workload.
 
 ---
 
-## 3. heterogeneous_prompt
+## 3. `heterogeneous_prompt`
 
-### 3.1 实验目的
+### 3.1 Experiment goal
 
-该实验用于构造高度异构的 prompt 负载，以验证在 `prefill/decode` 混合程度变化明显的场景下，时间预算调度是否相较固定 `chunk_size` 更有优势。
+This experiment constructs highly heterogeneous prompt workloads to test whether time-budget scheduling performs better than fixed `chunk_size` scheduling when the `prefill/decode` mix changes significantly.
 
-该实验的核心关注点是：
+The key questions are:
 
-- prompt 长度分布是否足够异构
-- `prefill/decode` 比例是否显著波动
-- 固定 `target_time` 是否比固定 `chunk_size` 更适应这种异构负载
+- whether the prompt length distribution is heterogeneous enough
+- whether the `prefill/decode` ratio fluctuates significantly
+- whether fixed `target_time` adapts better than fixed `chunk_size` under such heterogeneous workloads
 
-### 3.2 脚本说明
+### 3.2 Script description
 
-当前包含两个脚本：
+There are currently two scripts:
 
 - `example/experiment/heterogeneous_prompt/chunk_size.py`
-  - 使用 `SarathiSchedulerConfig`
-  - 固定 `chunk_size`，观察异构 prompt 负载下的分批效果
+  - Uses `SarathiSchedulerConfig`
+  - Fixes `chunk_size` and observes batch formation behavior under heterogeneous prompt workloads
 - `example/experiment/heterogeneous_prompt/target_time.py`
-  - 使用 `OptSarathiSchedulerConfig`
-  - 固定 `target_time`，观察时间预算调度在异构负载下的收益
+  - Uses `OptSarathiSchedulerConfig`
+  - Fixes `target_time` and observes the benefit of time-budget scheduling under heterogeneous workloads
 
-### 3.3 负载构造方式
+### 3.3 Workload construction
 
-两个脚本都不再直接顺序读取普通 prompt 列表，而是通过
+Neither script reads a normal prompt list sequentially anymore. Instead, both use
 `sarathi.utils.prompt_utils.build_heterogeneous_prompt_dataset(...)`
-构造“两段式极端异构 prompt”：
+to construct a two-segment, extremely heterogeneous prompt workload:
 
-- 从 `dataset/ShareGPT_V3_unfiltered_cleaned_split.json` 中提取首个 human prompt
-- 只保留两种 prompt：
-  - short prompt: `10 ~ 30` tokens
-  - long prompt: `500 ~ 512` tokens
-- `short / long` 比例可配置，默认 `1:1`
-- 请求顺序会在满足 short/long 比例后随机打散，但同一 `seed` 下可复现
-- 为每条 prompt 单独分配 `num_decode_tokens`
-- short prompt 默认走 `decode_heavy`
-- long prompt 默认走 `prefill_heavy`
-- 每条请求会用自己的 `SamplingParams(max_tokens=record["num_decode_tokens"])` 提交给引擎
-- 脚本默认设置 `SARATHI_SAMPLING_BACKEND=torch`，避免 `flashinfer` 采样在高异构负载下出现不稳定 warning
+- extract the first human prompt from `dataset/ShareGPT_V3_unfiltered_cleaned_split.json`
+- keep only two kinds of prompts:
+  - short prompts: `10 ~ 30` tokens
+  - long prompts: `500 ~ 512` tokens
+- the `short / long` ratio is configurable and defaults to `1:1`
+- request order is shuffled after satisfying the short/long ratio, but remains reproducible with the same `seed`
+- assign `num_decode_tokens` separately for each prompt
+- short prompts default to the `decode_heavy` regime
+- long prompts default to the `prefill_heavy` regime
+- each request is submitted to the engine with its own `SamplingParams(max_tokens=record["num_decode_tokens"])`
+- the scripts set `SARATHI_SAMPLING_BACKEND=torch` by default to avoid unstable `flashinfer` sampling warnings under highly heterogeneous workloads
 
-因此，该 workload 同时具备：
+As a result, this workload simultaneously provides:
 
-- prefill token 数差异大
-- decode token 数差异大
-- `prefill/decode` 比例变化明显
-- 同一组参数和 `seed` 下可复现
+- large variation in prefill token counts
+- large variation in decode token counts
+- clear changes in the `prefill/decode` ratio
+- reproducibility under the same parameter set and `seed`
 
-### 3.4 默认实验参数
+### 3.4 Default experiment parameters
 
-两个脚本当前使用同一组异构 prompt 参数：
+Both scripts currently use the same heterogeneous prompt parameters:
 
 - `PROMPTS_NUMBER = 200`
 - `model_config.max_model_len = 1024`
@@ -144,16 +144,16 @@ cd /home/ta/project/sarathi-serve
 - `SHORT_LONG_RATIO = (1, 1)`
 - `MIN_DECODE_TOKENS = 16`
 
-### 3.5 输出文件
+### 3.5 Output files
 
-每次运行会在对应 `output_dir` 下额外保存：
+Each run additionally saves the following under its `output_dir`:
 
 - `config.json`
-  - 包含调度参数、异构 prompt 参数和本次 workload 摘要
+  - Includes scheduling parameters, heterogeneous prompt parameters, and the workload summary for the run
 - `replica_0/heterogeneous_prompts.json`
-  - 包含本次实验实际使用的 prompt 文本、`prompt_type`、`num_prefill_tokens`、`num_decode_tokens`、`pd_ratio`、`decode_regime`
+  - Includes the prompt text, `prompt_type`, `num_prefill_tokens`, `num_decode_tokens`, `pd_ratio`, and `decode_regime` actually used in the experiment
 
-### 3.6 运行方式
+### 3.6 How to run
 
 ```bash
 cd /home/ta/project/sarathi-serve
@@ -161,55 +161,55 @@ cd /home/ta/project/sarathi-serve
 ./env/bin/python example/experiment/heterogeneous_prompt/target_time.py
 ```
 
-### 3.7 调参建议
+### 3.7 Tuning suggestions
 
-如果你想进一步强化异构性，优先调以下参数：
+If you want to make the workload even more heterogeneous, prioritize tuning:
 
-- 拉大 short/long 两段区间之间的间隔
-- 调整 `SHORT_LONG_RATIO`
-- 提高 long prompt 下界
-- 提高 `model_config.max_model_len`
+- the gap between the short and long prompt ranges
+- `SHORT_LONG_RATIO`
+- the lower bound for long prompts
+- `model_config.max_model_len`
 
-如果你想保持实验严格可复现，尽量不要改：
+If you want the experiment to remain strictly reproducible, try not to change:
 
 - `DATA_SOURCE`
 - `HETEROGENEOUS_PROMPT_SEED`
-- tokenizer 对应模型
+- the tokenizer-aligned model
 
 ---
 
-## 4. active_prefill_control
+## 4. `active_prefill_control`
 
-### 4.1 实验目的
+### 4.1 Experiment goal
 
-该实验用于对比在相同 workload 条件下，关闭与开启 `Active Prefill Control (APC)` 时的行为差异。这里的 APC 关注 unfinished prefill 的活跃度控制，而不是静态预留固定槽位。
+This experiment compares behavior with `Active Prefill Control (APC)` disabled versus enabled under the same workload. Here, APC refers to controlling the activity level of unfinished prefills, rather than statically reserving fixed slots.
 
-该实验主要回答三类问题：
+The experiment mainly answers three questions:
 
-- 开启 APC 后，unfinished prefill 是否真的发生了“受控活跃”而非完全不触发
-- 开启 APC 后，batch 结构是否发生变化，例如平均 prefill chunk 是否变大、decode-only batch 是否减少
-- 这些结构变化最终是否会传导到 `prefill_e2e_time` 与 `request_e2e_time`
+- after enabling APC, are unfinished prefills actually scheduled in a controlled active manner, rather than never being triggered at all
+- after enabling APC, does batch structure change, for example with larger average prefill chunks or fewer decode-only batches
+- do those structural changes ultimately affect `prefill_e2e_time` and `request_e2e_time`
 
-### 4.2 脚本说明
+### 4.2 Script description
 
-当前目录包含以下脚本：
+This directory currently contains:
 
 - `example/experiment/active_prefill_control/common.py`
-  - 公共参数、workload 构造、实验执行入口
+  - shared parameters, workload construction, and the experiment entry point
 - `example/experiment/active_prefill_control/baseline.py`
-  - 关闭 APC，作为对照组
+  - APC disabled, used as the control group
 - `example/experiment/active_prefill_control/enabled.py`
-  - 开启 APC，作为实验组
+  - APC enabled, used as the treatment group
 - `example/experiment/active_prefill_control/run_pair.py`
-  - 依次运行 `baseline.py` 和 `enabled.py`，然后自动调用对比脚本
+  - runs `baseline.py` and `enabled.py` in sequence, then automatically calls the comparison script
 - `example/experiment/active_prefill_control/compare_runs.py`
-  - 对两次运行结果进行汇总，输出均值、P90 与 APC 行为统计
+  - aggregates results from two runs and reports means, P90 values, and APC behavior statistics
 - `example/experiment/active_prefill_control/README.md`
-  - 该实验目录自己的简版说明
+  - the short README for this experiment directory
 
-### 4.3 当前 workload 特征
+### 4.3 Current workload characteristics
 
-`common.py` 当前默认构造的是一个更偏向 `decode-heavy` 的 clustered workload，用于放大 unfinished prefill 与 decode 的竞争关系。关键参数包括：
+`common.py` currently constructs a clustered workload that is more `decode-heavy`, in order to amplify the competition between unfinished prefills and decodes. Key parameters include:
 
 - `PROMPTS_NUMBER = 240`
 - `TARGET_TIME = 100`
@@ -227,18 +227,18 @@ cd /home/ta/project/sarathi-serve
 - `MAX_NUM_SEQS = 32`
 - `GPU_MEMORY_UTILIZATION = 0.65`
 
-APC 相关默认参数为：
+The default APC-related parameters are:
 
 - `MAX_ACTIVE_PREFILL_SEQS = 6`
 - `MIN_ACTIVE_PREFILL_CHUNK_SIZE = 16`
 
-### 4.4 输出文件
+### 4.4 Output files
 
-除了通用输出文件之外，该实验还会额外生成：
+In addition to the common output files, this experiment also generates:
 
 - `replica_0/active_prefill_control_stats_rank0.csv`
-  - APC 的逐 batch 行为统计文件
-  - 主要字段包括：
+  - the per-batch APC behavior statistics file
+  - key fields include:
     - `active_prefill_seq_cap`
     - `active_prefill_seq_count`
     - `deferred_prefill_seq_count`
@@ -248,12 +248,12 @@ APC 相关默认参数为：
     - `scheduled_prefill_tokens`
     - `avg_prefill_chunk`
 
-`compare_runs.py` 当前会读取：
+`compare_runs.py` currently reads:
 
 - `replica_0/sequence_metrics.csv`
 - `replica_0/active_prefill_control_stats_rank0.csv`
 
-并输出：
+and reports:
 
 - `request_e2e_mean`
 - `prefill_e2e_mean`
@@ -266,9 +266,9 @@ APC 相关默认参数为：
 - `blocked_by_min_chunk_total`
 - `delta:on-off`
 
-### 4.5 运行方式
+### 4.5 How to run
 
-单独运行：
+Run individually:
 
 ```bash
 cd /home/ta/project/sarathi-serve
@@ -276,14 +276,14 @@ cd /home/ta/project/sarathi-serve
 ./env/bin/python example/experiment/active_prefill_control/enabled.py
 ```
 
-使用自动对比脚本：
+Use the automatic comparison script:
 
 ```bash
 cd /home/ta/project/sarathi-serve
 ./env/bin/python example/experiment/active_prefill_control/run_pair.py
 ```
 
-如果你已经有一组 `off/on` 输出目录，也可以手动指定给对比脚本：
+If you already have an `off/on` pair of output directories, you can also pass them to the comparison script manually:
 
 ```bash
 cd /home/ta/project/sarathi-serve
@@ -292,48 +292,48 @@ cd /home/ta/project/sarathi-serve
   /path/to/on_dir
 ```
 
-### 4.6 建议观察指标
+### 4.6 Suggested metrics to inspect
 
-当你分析 APC 实验时，建议优先看以下几组指标：
+When analyzing APC experiments, start with the following groups of metrics:
 
-- 请求侧：
+- request-side:
   - `prefill_e2e_time`
   - `request_e2e_time`
-- batch 结构侧：
+- batch-structure side:
   - `scheduled_prefill_seq_count`
   - `avg_prefill_chunk`
-  - `decode-only batch` 比例
-- APC 行为侧：
+  - the proportion of decode-only batches
+- APC behavior side:
   - `active_prefill_seq_count`
   - `deferred_prefill_seq_count`
   - `waiting_prefill_blocked_by_cap`
   - `waiting_prefill_blocked_by_min_chunk`
 
-如果 `active_prefill_control_stats_rank0.csv` 中长期看不到 `active_prefill_seq_count > 0`，通常意味着：
+If `active_prefill_control_stats_rank0.csv` rarely shows `active_prefill_seq_count > 0` over time, it usually means one of the following:
 
-- 当前 workload 还不够容易触发 APC
-- `C_max` 太大，APC 退化为接近无约束放行
-- `L_min` 太小，APC 缺乏最小有效推进约束
-- 或者相反，`L_min` 太大，导致 prefill 很难进入 active 集合
-
----
-
-## 5. 推荐使用顺序
-
-如果你是第一次使用这些实验脚本，建议按以下顺序：
-
-1. 先运行 `heterogeneous_prompt/target_time.py`，确认时间预算实验链路可正常工作。
-2. 再运行 `active_prefill_control/baseline.py` 与 `enabled.py`，确认 APC 开关实验能正常产出 `sequence_metrics.csv` 与 `active_prefill_control_stats_rank0.csv`。
-3. 最后使用 `run_pair.py` 或 `compare_runs.py` 做成对对比。
+- the current workload is still not easy enough to trigger APC
+- `C_max` is too large, so APC degenerates into nearly unconstrained admission
+- `L_min` is too small, so APC lacks a minimum useful-progress constraint
+- or conversely, `L_min` is too large, making it difficult for prefills to enter the active set
 
 ---
 
-## 6. 后续扩展建议
+## 5. Recommended order of use
 
-如果后续继续在 `example/experiment/` 下新增实验，建议统一遵循以下约定：
+If you are using these experiment scripts for the first time, the recommended order is:
 
-- 每个实验子目录至少包含一个局部 README
-- 统一将公共参数放入 `common.py` 或等价文件中
-- 统一通过 `config.json` 保存运行配置与 workload 摘要
-- 若新增调度行为统计，不要修改现有 `select_stats_rank0.csv` 语义，优先新增独立统计文件
-- 若提供 `on/off` 对比，建议同时提供一个自动汇总脚本
+1. Run `heterogeneous_prompt/target_time.py` first to confirm that the time-budget experiment path works correctly.
+2. Then run `active_prefill_control/baseline.py` and `enabled.py` to confirm that the APC switch experiment produces `sequence_metrics.csv` and `active_prefill_control_stats_rank0.csv` correctly.
+3. Finally, use `run_pair.py` or `compare_runs.py` for paired comparison.
+
+---
+
+## 6. Suggestions for future extensions
+
+If you add more experiments under `example/experiment/` later, it is recommended to follow these conventions:
+
+- each experiment subdirectory should contain at least one local README
+- keep shared parameters in `common.py` or an equivalent file
+- use `config.json` consistently to save the run configuration and workload summary
+- if you add new scheduler behavior statistics, do not change the meaning of the existing `select_stats_rank0.csv`; prefer adding a separate statistics file
+- if you provide `on/off` comparisons, also provide an automatic summarization script

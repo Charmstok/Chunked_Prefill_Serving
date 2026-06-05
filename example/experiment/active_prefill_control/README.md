@@ -1,19 +1,19 @@
 # active_prefill_control
 
-该实验对比两种设置：
+This experiment compares two configurations:
 
-- `baseline.py`：关闭 active prefill 控制。
-- `enabled.py`：开启 active prefill 并发上限与最小有效 chunk 控制。
+- `baseline.py`: disables active prefill control.
+- `enabled.py`: enables a concurrency cap on active prefills and a minimum effective chunk-size constraint.
 
-统一 workload 特征：
+Shared workload characteristics:
 
 - `max_num_seqs=32`
 - `chunk_size=512`
 - `target_time=100`
 - clustered arrival
-- short prompt 主导，且 short prompt 对应 decode-heavy workload
+- short prompts dominate, and the short prompts correspond to a decode-heavy workload
 
-新增输出文件：
+Additional output file:
 
 - `active_prefill_control_stats_rank0.csv`
   - `active_prefill_seq_cap`
@@ -25,7 +25,7 @@
   - `scheduled_prefill_tokens`
   - `avg_prefill_chunk`
 
-运行方式：
+How to run:
 
 ```bash
 cd /home/ta/project/sarathi-serve
@@ -34,7 +34,7 @@ cd /home/ta/project/sarathi-serve
 ./env/bin/python example/experiment/active_prefill_control/compare_runs.py
 ```
 
-或者直接顺序运行：
+Or run everything sequentially:
 
 ```bash
 cd /home/ta/project/sarathi-serve

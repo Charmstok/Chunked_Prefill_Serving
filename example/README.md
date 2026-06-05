@@ -1,63 +1,62 @@
-# 调整参数
+# Parameter Tuning
 
-## 参数 1：AGING策略的 `prompt_weight`
+## Parameter 1: `prompt_weight` for the AGING policy
 
-要把 AGING 的参数（time_weight 和 prompt_weight）选得“更对”，核心是把两个量统一到同一尺度，并且明确**你想优化的目标**（TTFT 还是整体 E2E、吞吐还是公平）。
+To choose better AGING parameters (`time_weight` and `prompt_weight`), the key is to put the two terms on the same scale and to be explicit about the objective you want to optimize: TTFT or overall E2E, throughput or fairness.
 
-优先级设定公式：`priority = time_weight * wait_seconds + prompt_weight * remaining_prompt_tokens`
+Priority formula: `priority = time_weight * wait_seconds + prompt_weight * remaining_prompt_tokens`
 
-最简单、也最“物理一致”的做法是
-- `time_weight` 设成 “每秒可以处理的 prefill token数”。这个值可以由 `1` 除以 **每个 prefill token 需要的秒数**”得到，每个 prefill token 需要的秒数可以从基准测试结果（位于 ./offline_inference_output/{time}/replica_0/prefill_time_execution_plus_preemption_normalized.csv），选择 **P80 / 平均数**。
+The simplest and most physically consistent approach is:
+- Set `time_weight` to the number of prefill tokens that can be processed per second. You can derive this as `1 / seconds_per_prefill_token`, where `seconds_per_prefill_token` can be estimated from the benchmark results in `./offline_inference_output/{time}/replica_0/prefill_time_execution_plus_preemption_normalized.csv`, using either the P80 or the mean.
+- Set `prompt_weight` to `-1.0`.
 
-- `prompt_weight` 设成 `-1.0`
-
-> 如果是为了吞吐量优先，可以减小 `time_weight`，让系统更偏向短请求 。
+> If you want to prioritize throughput, reduce `time_weight` so the system favors shorter requests.
 >
-> 例如，默认数值 `125 * 0.3`, `-1.0` 就更偏向于短请求。
+> For example, the default values `125 * 0.3` and `-1.0` bias the scheduler more toward short requests.
 
 ---
 
-# 训练“时间预算”模型
+# Training the Time-Budget Model
 
-本项目的 “时间预算” 调度依赖 `sarathi/time_balance/predict_time.py` 训练得到的 `TimePredictor`（MLP 回归器），用于在调度阶段预测某个 batch 的执行耗时（ms）。
+The project's time-budget scheduler depends on the `TimePredictor` (an MLP regressor) trained by `sarathi/time_balance/predict_time.py`. The model is used during scheduling to predict the execution time of a batch in milliseconds.
 
-训练流程分两步：先离线收集 `select_stats_rank*.csv`，再训练并保存模型。
+The training workflow has two steps: first collect `select_stats_rank*.csv` offline, then train and save the model.
 
-## 1. 离线收集训练数据（select stats CSV）
+## 1. Collect training data offline (`select stats` CSV)
 
-先运行离线脚本，它会用 `SarathiScheduler` 跑一批请求，并在模型执行阶段写出 `select_stats_rank0.csv`：
+First run the offline script. It uses `SarathiScheduler` to process a batch of requests and writes `select_stats_rank0.csv` during model execution:
 
 ```sh
 python example/time_balance/offline_select_status_csv.py
 ```
 
-说明：
-- 脚本输出目录在 `offline_inference_output/<时间戳>/replica_0/`。
-- 关键产物是 `select_stats_rank0.csv`（包含 `decode_tokens/prefill_tokens/.../latency_ms` 等特征与标签）。
-- 若你改了脚本里的 `chunk_size/max_num_seqs/max_model_len` 等参数，建议在训练配置里保持一致（尤其是 `chunk_size`）。
+Notes:
+- The script output directory is `offline_inference_output/<timestamp>/replica_0/`.
+- The key artifact is `select_stats_rank0.csv`, which contains features and labels such as `decode_tokens/prefill_tokens/.../latency_ms`.
+- If you changed parameters such as `chunk_size/max_num_seqs/max_model_len` in the script, keep the training configuration consistent, especially `chunk_size`.
 
-## 2. 配置训练路径与分桶参数
+## 2. Configure the training paths and bucketing parameters
 
-打开 `sarathi/time_balance/config.py`，按你刚生成的数据修改：
-- `CSV_PATH`：指向你最新目录下的 `select_stats_rank0.csv`
-- `MODEL_CACHE_PATH`：模型保存路径（默认在 `sarathi/time_balance/time_predictor_mlp_v6.pt`）
-- `BUCKET_SPLIT_CONFIG.chunk_size`：建议与数据采集时的 scheduler `chunk_size` 一致（默认 256）
+Open `sarathi/time_balance/config.py` and update it based on the data you just generated:
+- `CSV_PATH`: path to the latest `select_stats_rank0.csv`
+- `MODEL_CACHE_PATH`: where the trained model will be saved (default: `sarathi/time_balance/time_predictor_mlp_v6.pt`)
+- `BUCKET_SPLIT_CONFIG.chunk_size`: recommended to match the scheduler `chunk_size` used during data collection (default: `256`)
 
-## 3. 训练并保存模型
+## 3. Train and save the model
 
-执行：
+Run:
 
 ```sh
 python sarathi/time_balance/predict_time.py
 ```
 
-训练完成后会输出 train/val/test 的 MAE，并将模型写入 `MODEL_CACHE_PATH`。
+After training, the script prints the train/val/test MAE and writes the model to `MODEL_CACHE_PATH`.
 
-## 4. 使用说明（OptSarathiScheduler）
+## 4. Usage notes (`OptSarathiScheduler`)
 
-`OptSarathiScheduler` 会在初始化时从 `sarathi/time_balance/config.py` 的 `MODEL_CACHE_PATH` 加载模型；如果文件不存在会直接 `assert` 报错（确保线上不会静默退化）。
+`OptSarathiScheduler` loads the model from `MODEL_CACHE_PATH` in `sarathi/time_balance/config.py` during initialization. If the file does not exist, it raises an `assert` immediately to avoid silent degradation in production.
 
-可用下面脚本快速验证模型能否正确加载并预测：
+Use the following script to quickly verify that the model loads correctly and can make predictions:
 
 ```sh
 python sarathi/time_balance/load_model.py
